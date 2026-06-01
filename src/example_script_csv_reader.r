@@ -116,16 +116,41 @@ n_absence    <- nrow(presence_df) * 2
 #  filter(name == "Bayern") %>%
 #  st_simplify(dTolerance = 0.01)
 
-bavaria_sf <- rnaturalearth::ne_download(
+
+states_raw <- rnaturalearth::ne_download(
   scale = 50, type = "states", category = "cultural",
   returnclass = "sf"
-) %>%
-  dplyr::filter(name == "Bayern")
+)
 
+# Spaltenname prüfen:
+print("Spalten in states_raw:")
+print(names(states_raw))
+cat("Verfügbare Spalten:", paste(names(states_raw), collapse = ", "), "\n")
+cat("Deutsche Bundesländer:\n")
+print(states_raw %>% dplyr::filter(admin == "Germany") %>% dplyr::select(name, name_en, gn_name) %>% st_drop_geometry())
+
+# bavaria_sf <- rnaturalearth::ne_download(
+#  scale = 50, type = "states", category = "cultural",
+#  returnclass = "sf"
+#) %>%
+#  dplyr::filter(name == "Bayern")
+
+# Fallback: Nutzt rechteck als Grenzen
+bavaria_sf <- st_as_sfc(st_bbox(c(
+  xmin = 8.9, xmax = 13.9,
+  ymin = 47.2, ymax = 50.6
+), crs = st_crs(4326))) %>%
+  st_as_sf()
+
+print("Bayern SF-Objekt:")
+print(bavaria_sf)
 
 absence_pts <- st_sample(bavaria_sf, size = n_absence * 3) %>%
   st_as_sf() %>%
   st_set_crs(4326)
+
+print("Negative Punkte (sf):")
+print(absence_pts)
 
 presence_sf <- st_as_sf(presence_df, coords = c("lng", "lat"), crs = 4326)
 dist_matrix  <- st_distance(absence_pts, presence_sf)
@@ -254,7 +279,7 @@ heatmap_df <- as.data.frame(r, xy = TRUE) %>%
 #  filter(name == "Bayern") %>%
 #  st_simplify(dTolerance = 0.01)
 
-bavaria_sf <- rnaturalearth::ne_download(
+bavaria_outline <- rnaturalearth::ne_download(
   scale = 50, type = "states", category = "cultural",
   returnclass = "sf"
 ) %>%
