@@ -105,15 +105,15 @@ cat("Verwertbare Fund-Datensätze:", nrow(presence_df), "\n")
 
 # Reduziere die Anzahl der Präsenzpunkte für schnelleres Testen
 presence_df <- presence_df %>%
-  slice_sample(n = 100)
+  slice_sample(n = 1000)
 
-cat("Nach Stichprobe (100 Präsenzpunkte):", nrow(presence_df), "\n")
+cat("Nach Stichprobe (1000 Präsenzpunkte):", nrow(presence_df), "\n")
 
 # ── 3. Pseudo-Absence generieren ──────────────────────────────────────────────
 set.seed(42)
 
 bbox_bavaria <- c(xmin = 8.9, xmax = 13.9, ymin = 47.2, ymax = 50.6)
-n_absence    <- nrow(presence_df) * 2
+n_absence    <- nrow(presence_df) # * 2
 
 # PROBLEM: Bei scale=50 ist Deuitschland nicht enthalten
 
@@ -270,8 +270,10 @@ cell_idx         <- cellFromXY(r, as.matrix(pred_grid[, c("lng", "lat")]))
 r[cell_idx]      <- pred_grid$prob_present
 names(r)         <- "fund_wahrscheinlichkeit"
 
-writeRaster(r, "heatmap_eisenzeit_bavaria.tif", overwrite = TRUE)
-cat("GeoTIFF gespeichert: heatmap_eisenzeit_bavaria.tif\n")
+save_name <- "heatmap_eisenzeit_bavaria2"
+
+writeRaster(r, save_name + ".tif", overwrite = TRUE)
+cat("GeoTIFF gespeichert: " + save_name + ".tif\n")
 
 # ── 8. Visualisierung mit ggplot2 ─────────────────────────────────────────────
 heatmap_df <- as.data.frame(r, xy = TRUE) %>%
@@ -323,9 +325,9 @@ p <- ggplot() +
   theme(plot.title = element_text(face = "bold"),
         legend.position = "right")
 
-ggsave("heatmap_eisenzeit_bavaria.png", plot = p,
+ggsave(save_name + ".png", plot = p,
        width = 12, height = 9, dpi = 300)
-cat("PNG gespeichert: heatmap_eisenzeit_bavaria.png\n")
+cat("PNG gespeichert: " + save_name + ".png\n")
 print(p)
 
 # ── 9. Modell-Evaluation ──────────────────────────────────────────────────────
