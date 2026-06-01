@@ -156,10 +156,16 @@ presence_sf <- st_as_sf(presence_df, coords = c("lng", "lat"), crs = 4326)
 dist_matrix  <- st_distance(absence_pts, presence_sf)
 min_dist_m   <- apply(dist_matrix, 1, min)
 
+print("Abstände der Absence-Punkte zu nächsten Presence-Punkten (m):")
+print(summary(min_dist_m))
+
 absence_pts    <- absence_pts[min_dist_m > 5000, ][1:n_absence, ]
 absence_coords <- st_coordinates(absence_pts) %>%
   as.data.frame() %>%
   rename(lng = X, lat = Y)
+
+print("Gefilterte Absence-Koordinaten (mind. 5 km von Präsenzpunkten entfernt):")
+print(head(absence_coords))
 
 absence_features <- absence_coords %>%
   mutate(
@@ -177,6 +183,9 @@ absence_features <- absence_coords %>%
     Temperatur_Jahr                 = mean(presence_df$Temperatur_Jahr,                  na.rm = TRUE) + rnorm(n(), 0, 0.5),
     presence = 0L
   )
+
+print("Absence-Features (erstes paar Zeilen):"
+print(head(absence_features))
 
 # ── 4. Trainings-Datensatz zusammenbauen ──────────────────────────────────────
 train_df <- bind_rows(
