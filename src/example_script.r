@@ -12,6 +12,21 @@
 #                      "rnaturalearthdata"))
 # =============================================================================
 
+# ── Pakete installieren (einmalig) ────────────────────────────────────────────
+required_packages <- c(
+  "DBI", "RMySQL", "tidyverse", "sf", "terra",
+  "ranger", "caret", "viridis",
+  "rnaturalearth", "rnaturalearthdata"
+)
+
+missing_packages <- required_packages[
+  !required_packages %in% installed.packages()[, "Package"]
+]
+
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages, dependencies = TRUE)
+}
+
 # ── 0. Pakete ─────────────────────────────────────────────────────────────────
 library(DBI)
 library(RMySQL)       # oder RMariaDB::MariaDB() falls bevorzugt
