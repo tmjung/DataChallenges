@@ -103,6 +103,12 @@ presence_df <- df %>%
 
 cat("Verwertbare Fund-Datensätze:", nrow(presence_df), "\n")
 
+# Reduziere die Anzahl der Präsenzpunkte für schnelleres Testen
+presence_df <- presence_df %>%
+  slice_sample(n = 100)
+
+cat("Nach Stichprobe (100 Präsenzpunkte):", nrow(presence_df), "\n")
+
 # ── 3. Pseudo-Absence generieren ──────────────────────────────────────────────
 set.seed(42)
 
