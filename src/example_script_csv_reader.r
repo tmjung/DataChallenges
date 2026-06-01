@@ -105,15 +105,15 @@ cat("Verwertbare Fund-Datensätze:", nrow(presence_df), "\n")
 
 # Reduziere die Anzahl der Präsenzpunkte für schnelleres Testen
 presence_df <- presence_df %>%
-  slice_sample(n = 1000)
+  slice_sample(n = 2000)
 
-cat("Nach Stichprobe (1000 Präsenzpunkte):", nrow(presence_df), "\n")
+cat("Nach Stichprobe (2000 Präsenzpunkte):", nrow(presence_df), "\n")
 
 # ── 3. Pseudo-Absence generieren ──────────────────────────────────────────────
 set.seed(42)
 
 bbox_bavaria <- c(xmin = 8.9, xmax = 13.9, ymin = 47.2, ymax = 50.6)
-n_absence    <- nrow(presence_df) # * 2
+n_absence    <- nrow(presence_df) * 2
 
 # PROBLEM: Bei scale=50 ist Deuitschland nicht enthalten
 
@@ -237,6 +237,9 @@ grid_sf    <- st_as_sf(pred_grid, coords = c("lng", "lat"), crs = 4326)
 in_bavaria <- st_intersects(grid_sf, bavaria_sf, sparse = FALSE)[, 1]
 pred_grid  <- pred_grid[in_bavaria, ]
 
+# Überprüfen: Wie viele Punkte liegen im Bayern-Polygon?
+sum(in_bavaria)
+
 pred_grid <- pred_grid %>%
   mutate(
     Höhe_SRTM1_puffer50m            = mean(train_df$Höhe_SRTM1_puffer50m,            na.rm = TRUE),
@@ -270,10 +273,22 @@ cell_idx         <- cellFromXY(r, as.matrix(pred_grid[, c("lng", "lat")]))
 r[cell_idx]      <- pred_grid$prob_present
 names(r)         <- "fund_wahrscheinlichkeit"
 
-save_name <- "heatmap_eisenzeit_bavaria2"
+# Überprüfen: Wie viele Rasterzellen wurden gefüllt? Daher die schwarzen flächen?
+sum(is.na(cell_idx))
+length(cell_idx)
 
-writeRaster(r, save_name + ".tif", overwrite = TRUE)
-cat("GeoTIFF gespeichert: " + save_name + ".tif\n")
+save_name <- "heatmap_eisenzeit_bavaria_3"
+save_name_tif <- paste(save_name, ".tif", sep = "")
+save_name_png <- paste(save_name, ".png", sep = "")
+
+writeRaster(r, save_name_tif, overwrite = TRUE)
+cat(paste("GeoTIFF gespeichert: ", save_name_tif, "\n")) 
+
+cat("Grid points:", nrow(pred_grid), "\n")
+cat("NA cell indices:", sum(is.na(cell_idx)), "\n")
+n_non_na <- global(r, "notNA", na.rm = TRUE)[1,1]
+cat("Raster non-NA cells:", n_non_na, "\n")
+cat("Bavaria points used:", sum(in_bavaria), "\n")
 
 # ── 8. Visualisierung mit ggplot2 ─────────────────────────────────────────────
 heatmap_df <- as.data.frame(r, xy = TRUE) %>%
@@ -325,9 +340,9 @@ p <- ggplot() +
   theme(plot.title = element_text(face = "bold"),
         legend.position = "right")
 
-ggsave(save_name + ".png", plot = p,
+ggsave(save_name_png, plot = p,
        width = 12, height = 9, dpi = 300)
-cat("PNG gespeichert: " + save_name + ".png\n")
+cat(paste("PNG gespeichert: ", save_name_png, "\n"))
 print(p)
 
 # ── 9. Modell-Evaluation ──────────────────────────────────────────────────────
