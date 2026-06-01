@@ -109,38 +109,29 @@ set.seed(42)
 bbox_bavaria <- c(xmin = 8.9, xmax = 13.9, ymin = 47.2, ymax = 50.6)
 n_absence    <- nrow(presence_df) * 2
 
-# bavaria_sf <- ne_states(country = "Germany", returnclass = "sf") %>%
-#   filter(name == "Bayern")
-# NEU (funktioniert ohne zusätzliche Pakete):
-#bavaria_sf <- ne_states(country = "Germany", returnclass = "sf") %>%
-#  filter(name == "Bayern") %>%
-#  st_simplify(dTolerance = 0.01)
+# PROBLEM: Bei scale=50 ist Deuitschland nicht enthalten
 
-
-states_raw <- rnaturalearth::ne_download(
-  scale = 50, type = "states", category = "cultural",
+states_raw <- ne_download(
+  scale = 10,
+  type = "states",
+  category = "cultural",
   returnclass = "sf"
 )
 
-# Spaltenname prüfen:
-print("Spalten in states_raw:")
-print(names(states_raw))
-cat("Verfügbare Spalten:", paste(names(states_raw), collapse = ", "), "\n")
-cat("Deutsche Bundesländer:\n")
-print(states_raw %>% dplyr::filter(admin == "Germany") %>% dplyr::select(name, name_en, gn_name) %>% st_drop_geometry())
+#unique(states_raw$admin)
 
-# bavaria_sf <- rnaturalearth::ne_download(
-#  scale = 50, type = "states", category = "cultural",
-#  returnclass = "sf"
-#) %>%
-#  dplyr::filter(name == "Bayern")
+germany_sf <- states_raw %>%
+  filter(admin == "Germany")
+
+bavaria_sf <- germany_sf |>
+  filter(name_de == "Bayern")
 
 # Fallback: Nutzt rechteck als Grenzen
-bavaria_sf <- st_as_sfc(st_bbox(c(
-  xmin = 8.9, xmax = 13.9,
-  ymin = 47.2, ymax = 50.6
-), crs = st_crs(4326))) %>%
-  st_as_sf()
+#bavaria_sf <- st_as_sfc(st_bbox(c(
+#  xmin = 8.9, xmax = 13.9,
+#  ymin = 47.2, ymax = 50.6
+#), crs = st_crs(4326))) %>%
+#  st_as_sf()
 
 print("Bayern SF-Objekt:")
 print(bavaria_sf)
@@ -184,7 +175,7 @@ absence_features <- absence_coords %>%
     presence = 0L
   )
 
-print("Absence-Features (erstes paar Zeilen):"
+print("Absence-Features (erstes paar Zeilen):")
 print(head(absence_features))
 
 # ── 4. Trainings-Datensatz zusammenbauen ──────────────────────────────────────
@@ -288,11 +279,15 @@ heatmap_df <- as.data.frame(r, xy = TRUE) %>%
 #  filter(name == "Bayern") %>%
 #  st_simplify(dTolerance = 0.01)
 
-bavaria_outline <- rnaturalearth::ne_download(
-  scale = 50, type = "states", category = "cultural",
-  returnclass = "sf"
-) %>%
-  dplyr::filter(name == "Bayern")
+#bavaria_outline2 <- rnaturalearth::ne_download(
+#  scale = 50, type = "states", category = "cultural",
+#  returnclass = "sf"
+#) %>%
+#  dplyr::filter(name == "Bayern")
+
+bavaria_outline <- germany_sf |>
+  filter(name_de == "Bayern")
+
 
 p <- ggplot() +
   geom_raster(data = heatmap_df, aes(x = lng, y = lat, fill = prob)) +
