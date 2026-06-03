@@ -240,6 +240,9 @@ pred_grid  <- pred_grid[in_bavaria, ]
 # Überprüfen: Wie viele Punkte liegen im Bayern-Polygon?
 sum(in_bavaria)
 
+# Für die Punkte im Bayern-Polygon: Mittelwerte der Features aus
+# den Trainingsdaten verwenden was nicht ideal ist, aber ohne echte
+# Umwelt-Daten für die Rasterzellen eine pragmatische Lösung darstellt.
 pred_grid <- pred_grid %>%
   mutate(
     Höhe_SRTM1_puffer50m            = mean(train_df$Höhe_SRTM1_puffer50m,            na.rm = TRUE),
@@ -255,6 +258,15 @@ pred_grid <- pred_grid %>%
     Sonnenstunden_Jahr              = mean(train_df$Sonnenstunden_Jahr,              na.rm = TRUE),
     Temperatur_Jahr                 = mean(train_df$Temperatur_Jahr,                 na.rm = TRUE)
   )
+
+#pred_grid_sf <- st_as_sf(pred_grid, coords = c("lng","lat"), crs = 4326)
+#env_stack <- terra::rast(c(
+#  "height.tif",
+#  "slope.tif",
+#  "water.tif"
+#))
+#env_vals <- terra::extract(env_stack, vect(pred_grid_sf))
+#pred_grid <- bind_cols(pred_grid, env_vals)
 
 pred_prob              <- predict(rf_model,
                                   newdata = select(pred_grid, all_of(feature_cols)),
@@ -277,7 +289,7 @@ names(r)         <- "fund_wahrscheinlichkeit"
 sum(is.na(cell_idx))
 length(cell_idx)
 
-save_name <- "heatmap_eisenzeit_bavaria_3"
+save_name <- "heatmap_eisenzeit_bavaria_4"
 save_name_tif <- paste(save_name, ".tif", sep = "")
 save_name_png <- paste(save_name, ".png", sep = "")
 
@@ -313,7 +325,7 @@ bavaria_outline <- germany_sf |>
 
 
 p <- ggplot() +
-  geom_raster(data = heatmap_df, aes(x = lng, y = lat, fill = prob)) +
+  geom_tile(data = heatmap_df, aes(x = lng, y = lat, fill = prob)) +
   geom_sf(data = bavaria_outline, fill = NA, color = "white", linewidth = 0.4) +
   geom_point(data = presence_df,
              aes(x = lng, y = lat),
