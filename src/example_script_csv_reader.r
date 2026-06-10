@@ -109,6 +109,21 @@ presence_df <- presence_df %>%
 
 cat("Nach Stichprobe (2000 Präsenzpunkte):", nrow(presence_df), "\n")
 
+# Räumliche Zusatzfeatures für Präsenzpunkte berechnen
+presence_sf <- st_as_sf(presence_df, coords = c("lng", "lat"), crs = 4326)
+dist_matrix_pres <- st_distance(presence_sf, presence_sf)
+dist_matrix_pres <- matrix(as.numeric(dist_matrix_pres), nrow = nrow(presence_df))
+diag(dist_matrix_pres) <- Inf
+
+presence_df <- presence_df %>%
+  mutate(
+    dist_nearest_presence_km = apply(dist_matrix_pres, 1, min) / 1000,
+    presence_count_10km      = apply(dist_matrix_pres, 1, function(d) sum(d <= 10000))
+  )
+
+# Jetzt die neuen räumlichen Features in die Trainingsspalten aufnehmen
+feature_cols <- c(feature_cols, "dist_nearest_presence_km", "presence_count_10km")
+
 # ── 3. Pseudo-Absence generieren ──────────────────────────────────────────────
 set.seed(42)
 
@@ -156,7 +171,8 @@ min_dist_m   <- apply(dist_matrix, 1, min)
 print("Abstände der Absence-Punkte zu nächsten Presence-Punkten (m):")
 print(summary(min_dist_m))
 
-absence_pts    <- absence_pts[min_dist_m > 5000, ][1:n_absence, ]
+selected_rows <- which(min_dist_m > 5000)[1:n_absence]
+absence_pts    <- absence_pts[selected_rows, ]
 absence_coords <- st_coordinates(absence_pts) %>%
   as.data.frame() %>%
   rename(lng = X, lat = Y)
@@ -164,20 +180,51 @@ absence_coords <- st_coordinates(absence_pts) %>%
 print("Gefilterte Absence-Koordinaten (mind. 5 km von Präsenzpunkten entfernt):")
 print(head(absence_coords))
 
-absence_features <- absence_coords %>%
+# Für jeden gefilterten Absence-Punkt die drei nächsten Presence-Punkte finden
+nearest_ids <- t(apply(dist_matrix[selected_rows, , drop = FALSE], 1, function(d) order(d)[1:3]))
+
+absence_values <- as.data.frame(t(apply(nearest_ids, 1, function(ids) {
+  colMeans(presence_df[ids, c(
+    "Höhe_SRTM1_puffer50m",
+    "Neigung_SRTM1_puffer50m",
+    "Hangausrichtung_SRTM1_puffer50m",
+    "Loess_1zu500k_puffer50m",
+    "Wasser_puffer50m",
+    "Viewshed_km2",
+    "Umfeldanalyse_km2",
+    "Reliefenergie",
+    "Frosttage_Jahr",
+    "Niederschlag_Jahr",
+    "Sonnenstunden_Jahr",
+    "Temperatur_Jahr"
+  )], na.rm = TRUE)
+})))
+
+colnames(absence_values) <- c(
+  "Höhe_SRTM1_puffer50m",
+  "Neigung_SRTM1_puffer50m",
+  "Hangausrichtung_SRTM1_puffer50m",
+  "Loess_1zu500k_puffer50m",
+  "Wasser_puffer50m",
+  "Viewshed_km2",
+  "Umfeldanalyse_km2",
+  "Reliefenergie",
+  "Frosttage_Jahr",
+  "Niederschlag_Jahr",
+  "Sonnenstunden_Jahr",
+  "Temperatur_Jahr"
+)
+
+absence_dist_matrix <- matrix(as.numeric(dist_matrix[selected_rows, , drop = FALSE]),
+                                 nrow = length(selected_rows))
+absence_dist_km <- apply(absence_dist_matrix, 1, min) / 1000
+absence_count_10km <- apply(absence_dist_matrix, 1,
+                            function(d) sum(d <= 10000))
+
+absence_features <- bind_cols(absence_coords, absence_values) %>%
   mutate(
-    Höhe_SRTM1_puffer50m            = mean(presence_df$Höhe_SRTM1_puffer50m,            na.rm = TRUE) + rnorm(n(), 0, 50),
-    Neigung_SRTM1_puffer50m         = pmax(0, mean(presence_df$Neigung_SRTM1_puffer50m,  na.rm = TRUE) + rnorm(n(), 0, 2)),
-    Hangausrichtung_SRTM1_puffer50m = runif(n(), 0, 360),
-    Loess_1zu500k_puffer50m         = pmax(0, mean(presence_df$Loess_1zu500k_puffer50m,  na.rm = TRUE) + rnorm(n(), 0, 500)),
-    Wasser_puffer50m                = pmax(0, mean(presence_df$Wasser_puffer50m,         na.rm = TRUE) + rnorm(n(), 0, 200)),
-    Viewshed_km2                    = pmax(0, mean(presence_df$Viewshed_km2,             na.rm = TRUE) + rnorm(n(), 0, 5)),
-    Umfeldanalyse_km2               = pmax(0, mean(presence_df$Umfeldanalyse_km2,        na.rm = TRUE) + rnorm(n(), 0, 5)),
-    Reliefenergie                   = pmax(0, mean(presence_df$Reliefenergie,            na.rm = TRUE) + rnorm(n(), 0, 10)),
-    Frosttage_Jahr                  = pmax(0, mean(presence_df$Frosttage_Jahr,           na.rm = TRUE) + rnorm(n(), 0, 10)),
-    Niederschlag_Jahr               = pmax(0, mean(presence_df$Niederschlag_Jahr,        na.rm = TRUE) + rnorm(n(), 0, 50)),
-    Sonnenstunden_Jahr              = pmax(0, mean(presence_df$Sonnenstunden_Jahr,       na.rm = TRUE) + rnorm(n(), 0, 50)),
-    Temperatur_Jahr                 = mean(presence_df$Temperatur_Jahr,                  na.rm = TRUE) + rnorm(n(), 0, 0.5),
+    dist_nearest_presence_km = absence_dist_km,
+    presence_count_10km      = absence_count_10km,
     presence = 0L
   )
 
@@ -226,7 +273,7 @@ cat("\nBeste Parameter:\n"); print(rf_model$bestTune)
 cat("\nVariable Importance:\n"); print(varImp(rf_model))
 
 # ── 6. Vorhersage-Raster erstellen ────────────────────────────────────────────
-res <- 0.02
+res <- 0.01  # Rasterauflösung in Grad. Diese Einstellung steuert die Kachelgröße im Heatmap-Raster.
 
 pred_grid <- expand.grid(
   lng = seq(bbox_bavaria["xmin"], bbox_bavaria["xmax"], by = res),
@@ -240,25 +287,71 @@ pred_grid  <- pred_grid[in_bavaria, ]
 # Überprüfen: Wie viele Punkte liegen im Bayern-Polygon?
 sum(in_bavaria)
 
-# Für die Punkte im Bayern-Polygon: Mittelwerte der Features aus
-# den Trainingsdaten verwenden was nicht ideal ist, aber ohne echte
-# Umwelt-Daten für die Rasterzellen eine pragmatische Lösung darstellt.
-pred_grid <- pred_grid %>%
-  mutate(
-    Höhe_SRTM1_puffer50m            = mean(train_df$Höhe_SRTM1_puffer50m,            na.rm = TRUE),
-    Neigung_SRTM1_puffer50m         = mean(train_df$Neigung_SRTM1_puffer50m,         na.rm = TRUE),
-    Hangausrichtung_SRTM1_puffer50m = mean(train_df$Hangausrichtung_SRTM1_puffer50m, na.rm = TRUE),
-    Loess_1zu500k_puffer50m         = mean(train_df$Loess_1zu500k_puffer50m,         na.rm = TRUE),
-    Wasser_puffer50m                = mean(train_df$Wasser_puffer50m,                na.rm = TRUE),
-    Viewshed_km2                    = mean(train_df$Viewshed_km2,                    na.rm = TRUE),
-    Umfeldanalyse_km2               = mean(train_df$Umfeldanalyse_km2,               na.rm = TRUE),
-    Reliefenergie                   = mean(train_df$Reliefenergie,                   na.rm = TRUE),
-    Frosttage_Jahr                  = mean(train_df$Frosttage_Jahr,                  na.rm = TRUE),
-    Niederschlag_Jahr               = mean(train_df$Niederschlag_Jahr,               na.rm = TRUE),
-    Sonnenstunden_Jahr              = mean(train_df$Sonnenstunden_Jahr,              na.rm = TRUE),
-    Temperatur_Jahr                 = mean(train_df$Temperatur_Jahr,                 na.rm = TRUE)
-  )
+# Für die Punkte im Bayern-Polygon: Feature-Werte aus den drei nächsten
+# Präsenzpunkten ableiten, damit die Modellvorhersage räumlich variiert.
+pres_coords <- as.matrix(select(presence_df, lng, lat))
+pres_features <- select(presence_df, all_of(feature_cols))
 
+compute_nearest_feature_values <- function(grid_xy, pres_xy, pres_feats, k = 3, chunk_size = 1000) {
+  n_grid <- nrow(grid_xy)
+  out <- matrix(NA_real_, nrow = n_grid, ncol = ncol(pres_feats))
+  colnames(out) <- colnames(pres_feats)
+
+  for (start in seq(1, n_grid, by = chunk_size)) {
+    end <- min(start + chunk_size - 1, n_grid)
+    chunk_xy <- grid_xy[start:end, , drop = FALSE]
+    dx <- outer(chunk_xy[, 1], pres_xy[, 1], "-")
+    dy <- outer(chunk_xy[, 2], pres_xy[, 2], "-")
+    dist2 <- dx^2 + dy^2
+    nearest_ids <- t(apply(dist2, 1, function(row) order(row)[1:k]))
+    out[start:end, ] <- t(apply(nearest_ids, 1, function(ids) {
+      colMeans(pres_feats[ids, , drop = FALSE], na.rm = TRUE)
+    }))
+  }
+
+  as.data.frame(out)
+}
+
+compute_spatial_features <- function(grid_sf, pres_sf, radius_m = 10000, chunk_size = 1000) {
+  n_grid <- nrow(grid_sf)
+  dist_nearest_km <- numeric(n_grid)
+  count_within_radius <- integer(n_grid)
+
+  for (start in seq(1, n_grid, by = chunk_size)) {
+    end <- min(start + chunk_size - 1, n_grid)
+    dmat <- st_distance(grid_sf[start:end, ], pres_sf)
+    dnum <- matrix(as.numeric(dmat), nrow = nrow(dmat), ncol = ncol(dmat))
+    dist_nearest_km[start:end] <- apply(dnum, 1, min) / 1000
+    count_within_radius[start:end] <- apply(dnum, 1, function(d) sum(d <= radius_m))
+  }
+
+  tibble(
+    dist_nearest_presence_km = dist_nearest_km,
+    presence_count_10km      = count_within_radius
+  )
+}
+
+pred_grid <- bind_cols(
+  pred_grid,
+  compute_nearest_feature_values(
+    as.matrix(select(pred_grid, lng, lat)),
+    pres_coords,
+    pres_features,
+    k = 3,
+    chunk_size = 1000
+  ),
+  compute_spatial_features(grid_sf, presence_sf, radius_m = 10000, chunk_size = 1000)
+)
+
+# Debug: save pred_grid features and print summaries to help diagnose uniform predictions
+debug_file <- "pred_grid_features_debug.csv"
+write_csv(select(pred_grid, all_of(feature_cols)), debug_file)
+cat("Saved prediction-grid features to:", debug_file, "\n")
+cat("Feature summaries (prediction grid):\n")
+for (col in feature_cols) {
+  cat("--", col, "\n")
+  print(summary(pred_grid[[col]]))
+}
 #pred_grid_sf <- st_as_sf(pred_grid, coords = c("lng","lat"), crs = 4326)
 #env_stack <- terra::rast(c(
 #  "height.tif",
@@ -289,7 +382,7 @@ names(r)         <- "fund_wahrscheinlichkeit"
 sum(is.na(cell_idx))
 length(cell_idx)
 
-save_name <- "heatmap_eisenzeit_bavaria_4"
+save_name <- "heatmap_eisenzeit_bavaria_6"
 save_name_tif <- paste(save_name, ".tif", sep = "")
 save_name_png <- paste(save_name, ".png", sep = "")
 
@@ -324,8 +417,15 @@ bavaria_outline <- germany_sf |>
   filter(name_de == "Bayern")
 
 
+plot_subtitle <- sprintf(
+  "Model: Random Forest | Präsenz: %d | Absenz: %d | Auflösung: %.3f°",
+  sum(train_df$presence == "present"),
+  sum(train_df$presence == "absent"),
+  res
+)
+
 p <- ggplot() +
-  geom_tile(data = heatmap_df, aes(x = lng, y = lat, fill = prob)) +
+  geom_raster(data = heatmap_df, aes(x = lng, y = lat, fill = prob)) +
   geom_sf(data = bavaria_outline, fill = NA, color = "white", linewidth = 0.4) +
   geom_point(data = presence_df,
              aes(x = lng, y = lat),
@@ -344,12 +444,14 @@ p <- ggplot() +
   ) +
   labs(
     title    = "Predictive Modelling – Eisenzeitliche Fundstellen Bayern",
-    subtitle = "Modell: Random Forest | Gelbe Punkte = bekannte Fundorte",
-    caption  = "Datenbasis: VFPA Eisenzeit, BLfD | Fender 2017 | Data Challenge SS2026",
+    subtitle = plot_subtitle,
+    caption  = paste0("Datenbasis: VFPA Eisenzeit | Data Challenge SS2026 | Koo & Jungbeck",
+                      " | Rasterzellen: ", nrow(pred_grid)),
     x = "Längengrad", y = "Breitengrad"
   ) +
   theme_minimal(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
+        panel.grid = element_blank(),
         legend.position = "right")
 
 ggsave(save_name_png, plot = p,
