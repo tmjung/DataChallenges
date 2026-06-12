@@ -82,7 +82,7 @@ df <- raw %>%
   )
 
 # Feature-Spalten (Prädiktoren)
-feature_cols <- c(
+base_feature_cols <- c(
   "Höhe_SRTM1_puffer50m",
   "Neigung_SRTM1_puffer50m",
   "Hangausrichtung_SRTM1_puffer50m",
@@ -96,6 +96,9 @@ feature_cols <- c(
   "Sonnenstunden_Jahr",
   "Temperatur_Jahr"
 )
+spatial_feature_cols <- c("dist_nearest_presence_km", "presence_count_10km")
+feature_cols <- base_feature_cols
+model_feature_cols <- c(base_feature_cols, spatial_feature_cols)
 
 presence_df <- df %>%
   select(lng, lat, all_of(feature_cols), presence) %>%
@@ -122,7 +125,7 @@ presence_df <- presence_df %>%
   )
 
 # Jetzt die neuen räumlichen Features in die Trainingsspalten aufnehmen
-feature_cols <- c(feature_cols, "dist_nearest_presence_km", "presence_count_10km")
+feature_cols <- model_feature_cols
 
 # ── 3. Pseudo-Absence generieren ──────────────────────────────────────────────
 set.seed(42)
@@ -180,46 +183,34 @@ absence_coords <- st_coordinates(absence_pts) %>%
 print("Gefilterte Absence-Koordinaten (mind. 5 km von Präsenzpunkten entfernt):")
 print(head(absence_coords))
 
-# Für jeden gefilterten Absence-Punkt die drei nächsten Presence-Punkte finden
-nearest_ids <- t(apply(dist_matrix[selected_rows, , drop = FALSE], 1, function(d) order(d)[1:3]))
+# Für jeden gefilterten Absence-Punkt: robustere, weniger deterministische
+# Ableitung der Prädiktor-Werte. Statt immer genau die 3 nächste Präsenz-Mittelwerte
+# zu verwenden, ziehen wir die 10 nächsten Präsenzpunkte zur Auswahl und bilden
+# für jede Absenz zufällig ein Mittel aus 3 davon. Zusätzlich fügen wir kleinen
+# Gaußschen Rauschen (5% der Präsenz-SD) hinzu, um identische Feature-Vektoren
+# zu vermeiden, die das RF stark überfitten können.
+pres_feat_matrix <- as.matrix(select(presence_df, all_of(base_feature_cols)))
+pres_feat_sd <- apply(pres_feat_matrix, 2, sd, na.rm = TRUE)
 
-absence_values <- as.data.frame(t(apply(nearest_ids, 1, function(ids) {
-  colMeans(presence_df[ids, c(
-    "Höhe_SRTM1_puffer50m",
-    "Neigung_SRTM1_puffer50m",
-    "Hangausrichtung_SRTM1_puffer50m",
-    "Loess_1zu500k_puffer50m",
-    "Wasser_puffer50m",
-    "Viewshed_km2",
-    "Umfeldanalyse_km2",
-    "Reliefenergie",
-    "Frosttage_Jahr",
-    "Niederschlag_Jahr",
-    "Sonnenstunden_Jahr",
-    "Temperatur_Jahr"
-  )], na.rm = TRUE)
-})))
+nearest_full_ids <- t(apply(dist_matrix[selected_rows, , drop = FALSE], 1, function(d) order(d)[1:10]))
 
-colnames(absence_values) <- c(
-  "Höhe_SRTM1_puffer50m",
-  "Neigung_SRTM1_puffer50m",
-  "Hangausrichtung_SRTM1_puffer50m",
-  "Loess_1zu500k_puffer50m",
-  "Wasser_puffer50m",
-  "Viewshed_km2",
-  "Umfeldanalyse_km2",
-  "Reliefenergie",
-  "Frosttage_Jahr",
-  "Niederschlag_Jahr",
-  "Sonnenstunden_Jahr",
-  "Temperatur_Jahr"
-)
+absence_values <- t(apply(nearest_full_ids, 1, function(ord_row) {
+  # wähle die 3 nächsten Präsenzpunkte aus dem Pool der 10 nächsten aus
+  k_use  <- min(3, length(ord_row))
+  pick_ids <- sample(ord_row, k_use)
+  mu <- colMeans(pres_feat_matrix[pick_ids, , drop = FALSE], na.rm = TRUE)
+  # Rauschen proportional zur SD (kleiner Faktor)
+  noise <- rnorm(length(mu), mean = 0, sd = pmax(1e-6, pres_feat_sd * 0.05))
+  mu + noise
+}))
+
+absence_values <- as.data.frame(absence_values)
+colnames(absence_values) <- base_feature_cols
 
 absence_dist_matrix <- matrix(as.numeric(dist_matrix[selected_rows, , drop = FALSE]),
-                                 nrow = length(selected_rows))
+                               nrow = length(selected_rows))
 absence_dist_km <- apply(absence_dist_matrix, 1, min) / 1000
-absence_count_10km <- apply(absence_dist_matrix, 1,
-                            function(d) sum(d <= 10000))
+absence_count_10km <- apply(absence_dist_matrix, 1, function(d) sum(d <= 10000))
 
 absence_features <- bind_cols(absence_coords, absence_values) %>%
   mutate(
@@ -230,6 +221,278 @@ absence_features <- bind_cols(absence_coords, absence_values) %>%
 
 print("Absence-Features (erstes paar Zeilen):")
 print(head(absence_features))
+
+# ── 3b. Explorative Karten vor der Modellvorhersage erstellen ────────────────
+extra_plot_cols <- c(
+  "Temperatur_Sommer", "Niederschlag_Sommer", "Sonnenstunden_Sommer",
+  "Temperatur_Frühling", "Niederschlag_Frühling", "Sonnenstunden_Frühling"
+)
+# Get seasonal columns from df and merge with sampled presence_df
+seasonal_data <- df %>%
+  select(lng, lat, all_of(extra_plot_cols))
+
+# Use sampled presence_df (2000 points) for consistency with model data
+presence_plot_df <- presence_df %>%
+  select(lng, lat, all_of(base_feature_cols)) %>%
+  left_join(seasonal_data, by = c("lng", "lat")) %>%
+  mutate(type = "presence")
+
+# For absence, just use coords (no feature values needed for mapping)
+absence_plot_df <- absence_features %>%
+  select(lng, lat) %>%
+  mutate(type = "absence")
+
+cat(sprintf("Presence points for mapping: %d\n", nrow(presence_plot_df)))
+cat(sprintf("Absence points for mapping: %d\n", nrow(absence_plot_df)))
+
+plot_points_df <- bind_rows(presence_plot_df, absence_plot_df)
+
+save_point_map <- function(data, title, subtitle, color_var = NULL,
+                           color_label = NULL, file_name) {
+  p <- ggplot() +
+    geom_sf(data = bavaria_sf, fill = NA, color = "black", size = 0.3) +
+    geom_point(data = filter(data, type == "absence"),
+               aes(x = lng, y = lat),
+               color = "grey40", size = 0.8, alpha = 0.5) +
+    {
+      if (is.null(color_var)) {
+        geom_point(data = filter(data, type == "presence"),
+                   aes(x = lng, y = lat, color = type),
+                   size = 1.0, alpha = 0.8)
+      } else {
+        geom_point(data = filter(data, type == "presence"),
+                   aes(x = lng, y = lat, color = .data[[color_var]]),
+                   size = 1.0, alpha = 0.8)
+      }
+    } +
+    coord_sf(xlim = c(bbox_bavaria["xmin"], bbox_bavaria["xmax"]),
+             ylim = c(bbox_bavaria["ymin"], bbox_bavaria["ymax"]),
+             expand = FALSE) +
+    labs(title = title,
+         subtitle = subtitle,
+         color = ifelse(is.null(color_label), "type", color_label),
+         x = "Längengrad",
+         y = "Breitengrad") +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank(),
+          legend.position = "right",
+          plot.title = element_text(face = "bold"))
+
+  if (!is.null(color_var)) {
+    p <- p + scale_color_viridis_c(option = "magma", na.value = "grey50")
+  } else {
+    p <- p + scale_color_manual(values = c("presence" = "yellow", "absence" = "blue"))
+  }
+
+  ggsave(file_name, plot = p, width = 10, height = 8, dpi = 300)
+  cat("Saved map:", file_name, "\n")
+}
+
+save_feature_pair_map <- function(df, var1, var2, label1, label2, file_name) {
+  long_df <- df %>%
+    select(lng, lat, type, all_of(c(var1, var2))) %>%
+    pivot_longer(cols = all_of(c(var1, var2)),
+                 names_to = "feature",
+                 values_to = "value") %>%
+    mutate(feature = recode(feature,
+                            !!var1 := label1,
+                            !!var2 := label2))
+
+  p <- ggplot() +
+    geom_sf(data = bavaria_sf, fill = NA, color = "black", size = 0.3) +
+    geom_point(data = filter(long_df, type == "absence"),
+               aes(x = lng, y = lat),
+               color = "grey40", size = 0.7, alpha = 0.4) +
+    geom_point(data = filter(long_df, type == "presence"),
+               aes(x = lng, y = lat, color = value),
+               size = 0.9, alpha = 0.8) +
+    facet_wrap(~ feature, scales = "fixed") +
+    coord_sf(xlim = c(bbox_bavaria["xmin"], bbox_bavaria["xmax"]),
+             ylim = c(bbox_bavaria["ymin"], bbox_bavaria["ymax"]),
+             expand = FALSE) +
+    scale_color_viridis_c(option = "magma", na.value = "grey50") +
+    labs(title = paste0("Feature maps: ", label1, " and ", label2),
+         subtitle = "Präsenzpunkte koloriert; Absenzpunkte grau",
+         color = "Wert",
+         x = "Längengrad",
+         y = "Breitengrad") +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank(),
+          legend.position = "right",
+          plot.title = element_text(face = "bold"))
+
+  ggsave(file_name, plot = p, width = 12, height = 8, dpi = 300)
+  cat("Saved paired feature map:", file_name, "\n")
+}
+
+cat("Aspect:\n")
+summary(presence_plot_df$Hangausrichtung_SRTM1_puffer50m)
+
+cat("NAs:\n")
+sum(is.na(presence_plot_df$Hangausrichtung_SRTM1_puffer50m))
+
+cat("Rows:\n")
+nrow(filter(presence_plot_df,
+            !is.na(Hangausrichtung_SRTM1_puffer50m)))
+
+ggplot(
+  presence_plot_df,
+  aes(lng, lat)
+) +
+  geom_point(size = 0.5)
+
+save_point_map(plot_points_df,
+              title = "Presence and Absence Points",
+              subtitle = "Präsenzpunkte gelb, Absenzpunkte grau",
+              color_var = NULL,
+              file_name = "map_presence_absence.png")
+
+save_point_map(presence_plot_df,
+              title = "Height and Presence Points",
+              subtitle = "Farbskala zeigt Höhe (m)",
+              color_var = "Höhe_SRTM1_puffer50m",
+              color_label = "Höhe (m)",
+              file_name = "map_height_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Temperature and Presence Points",
+              subtitle = "Farbskala zeigt jährliche Temperatur (°C)",
+              color_var = "Temperatur_Jahr",
+              color_label = "Temperatur (°C)",
+              file_name = "map_temperature_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Summer Temperature and Presence Points",
+              subtitle = "Farbskala zeigt Sommertemperatur (°C)",
+              color_var = "Temperatur_Sommer",
+              color_label = "Temperatur Sommer (°C)",
+              file_name = "map_temperature_summer_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Spring Temperature and Presence Points",
+              subtitle = "Farbskala zeigt Frühlingstemperatur (°C)",
+              color_var = "Temperatur_Frühling",
+              color_label = "Temperatur Frühling (°C)",
+              file_name = "map_temperature_spring_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Sun Hours and Presence Points",
+              subtitle = "Farbskala zeigt jährliche Sonnenstunden",
+              color_var = "Sonnenstunden_Jahr",
+              color_label = "Sonnenstunden",
+              file_name = "map_sunhours_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Summer Sun Hours and Presence Points",
+              subtitle = "Farbskala zeigt Sonnenstunden im Sommer",
+              color_var = "Sonnenstunden_Sommer",
+              color_label = "Sonnenstunden Sommer",
+              file_name = "map_sunhours_summer_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Spring Sun Hours and Presence Points",
+              subtitle = "Farbskala zeigt Sonnenstunden im Frühling",
+              color_var = "Sonnenstunden_Frühling",
+              color_label = "Sonnenstunden Frühling",
+              file_name = "map_sunhours_spring_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Slope and Presence Points",
+              subtitle = "Farbskala zeigt Hangneigung",
+              color_var = "Neigung_SRTM1_puffer50m",
+              color_label = "Neigung",
+              file_name = "map_slope_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Aspect and Presence Points",
+              subtitle = "Farbskala zeigt Hangausrichtung",
+              color_var = "Hangausrichtung_SRTM1_puffer50m",
+              color_label = "Hangausrichtung",
+              file_name = "map_aspect_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Loess and Presence Points",
+              subtitle = "Farbskala zeigt Loess-Wert",
+              color_var = "Loess_1zu500k_puffer50m",
+              color_label = "Loess",
+              file_name = "map_loess_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Water and Presence Points",
+              subtitle = "Farbskala zeigt Wasser-Puffer-Wert",
+              color_var = "Wasser_puffer50m",
+              color_label = "Wasser",
+              file_name = "map_water_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Viewshed and Presence Points",
+              subtitle = "Farbskala zeigt Viewshed (km²)",
+              color_var = "Viewshed_km2",
+              color_label = "Viewshed",
+              file_name = "map_viewshed_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Surroundings and Presence Points",
+              subtitle = "Farbskala zeigt Umfeldanalyse (km²)",
+              color_var = "Umfeldanalyse_km2",
+              color_label = "Umfeldanalyse",
+              file_name = "map_surroundings_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Relief Energy and Presence Points",
+              subtitle = "Farbskala zeigt Reliefenergie",
+              color_var = "Reliefenergie",
+              color_label = "Reliefenergie",
+              file_name = "map_reliefenergy_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Frost Days and Presence Points",
+              subtitle = "Farbskala zeigt Frosttage im Jahr",
+              color_var = "Frosttage_Jahr",
+              color_label = "Frosttage",
+              file_name = "map_frostdays_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Annual Precipitation and Presence Points",
+              subtitle = "Farbskala zeigt jährlichen Niederschlag",
+              color_var = "Niederschlag_Jahr",
+              color_label = "Niederschlag",
+              file_name = "map_precipitation_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Summer Precipitation and Presence Points",
+              subtitle = "Farbskala zeigt Niederschlag im Sommer",
+              color_var = "Niederschlag_Sommer",
+              color_label = "Niederschlag Sommer",
+              file_name = "map_precipitation_summer_points.png")
+
+save_point_map(presence_plot_df,
+              title = "Spring Precipitation and Presence Points",
+              subtitle = "Farbskala zeigt Niederschlag im Frühling",
+              color_var = "Niederschlag_Frühling",
+              color_label = "Niederschlag Frühling",
+              file_name = "map_precipitation_spring_points.png")
+
+save_feature_pair_map(presence_plot_df,
+                      var1 = "Hangausrichtung_SRTM1_puffer50m",
+                      var2 = "Neigung_SRTM1_puffer50m",
+                      label1 = "Hangausrichtung",
+                      label2 = "Neigung",
+                      file_name = "map_aspect_slope_points.png")
+
+save_feature_pair_map(presence_plot_df,
+                      var1 = "Temperatur_Jahr",
+                      var2 = "Sonnenstunden_Jahr",
+                      label1 = "Temperatur (Jahr)",
+                      label2 = "Sonnenstunden (Jahr)",
+                      file_name = "map_temperature_sunhours_points.png")
+
+save_feature_pair_map(presence_plot_df,
+                      var1 = "Temperatur_Sommer",
+                      var2 = "Niederschlag_Sommer",
+                      label1 = "Temperatur (Sommer)",
+                      label2 = "Niederschlag (Sommer)",
+                      file_name = "map_temperature_precipitation_summer_points.png")
 
 # ── 4. Trainings-Datensatz zusammenbauen ──────────────────────────────────────
 train_df <- bind_rows(
@@ -263,7 +526,7 @@ rf_model <- train(
   tuneGrid  = expand.grid(
     mtry          = c(3, 5, 7),
     splitrule     = "gini",
-    min.node.size = c(5, 10)
+    min.node.size = c(5, 20)
   ),
   importance = "impurity"
 )
@@ -282,7 +545,19 @@ pred_grid <- expand.grid(
 
 grid_sf    <- st_as_sf(pred_grid, coords = c("lng", "lat"), crs = 4326)
 in_bavaria <- st_intersects(grid_sf, bavaria_sf, sparse = FALSE)[, 1]
+if (!is.logical(in_bavaria)) {
+  in_bavaria <- as.logical(in_bavaria)
+}
 pred_grid  <- pred_grid[in_bavaria, ]
+
+# Ensure grid_sf matches filtered pred_grid (avoid size mismatches later)
+grid_sf <- grid_sf[in_bavaria, ]
+
+cat(sprintf("in_bavaria class: %s\n", paste(class(in_bavaria), collapse=", ")))
+cat(sprintf("pred_grid rows after Bavaria filter: %d\n", nrow(pred_grid)))
+cat(sprintf("grid_sf rows after Bavaria filter: %d\n", nrow(grid_sf)))
+cat(sprintf("in_bavaria length: %d\n", length(in_bavaria)))
+cat(sprintf("sum(in_bavaria): %d\n", sum(in_bavaria)))
 
 # Überprüfen: Wie viele Punkte liegen im Bayern-Polygon?
 sum(in_bavaria)
@@ -290,7 +565,7 @@ sum(in_bavaria)
 # Für die Punkte im Bayern-Polygon: Feature-Werte aus den drei nächsten
 # Präsenzpunkten ableiten, damit die Modellvorhersage räumlich variiert.
 pres_coords <- as.matrix(select(presence_df, lng, lat))
-pres_features <- select(presence_df, all_of(feature_cols))
+pres_features <- select(presence_df, all_of(base_feature_cols))
 
 compute_nearest_feature_values <- function(grid_xy, pres_xy, pres_feats, k = 3, chunk_size = 1000) {
   n_grid <- nrow(grid_xy)
@@ -342,16 +617,59 @@ pred_grid <- bind_cols(
   ),
   compute_spatial_features(grid_sf, presence_sf, radius_m = 10000, chunk_size = 1000)
 )
+# Optional: if environmental raster layers exist, prefer extracting real raster
+# values at the prediction points. This avoids using presence-derived surrogates
+# where possible. Search common folders (env, data, project root) for .tif files.
+tif_files <- list.files(path = c("env", "data", "."), pattern = "\\.tif$",
+                        recursive = TRUE, full.names = TRUE)
+tif_files <- tif_files[file.exists(tif_files)]
+if (length(tif_files) > 0) {
+  cat("Found raster files, attempting terra::extract on:", paste0(tif_files, collapse = ", "), "\n")
+  env_stack <- tryCatch(rast(tif_files), error = function(e) NULL)
+  if (!is.null(env_stack)) {
+    pred_grid_sf <- st_as_sf(pred_grid, coords = c("lng", "lat"), crs = 4326)
+    env_vals <- terra::extract(env_stack, vect(pred_grid_sf))
+    # terra::extract returns ID plus layers. Drop ID column
+    if (ncol(env_vals) > 1) {
+      env_vals2 <- as.data.frame(env_vals)[, -1, drop = FALSE]
+      env_names <- names(env_vals2)
+      common <- intersect(feature_cols, env_names)
+      if (length(common) > 0) {
+        cat("Using matching raster layers for features:", paste(common, collapse = ", "), "\n")
+        pred_grid[, common] <- env_vals2[, common, drop = FALSE]
+      } else if (ncol(env_vals2) == length(feature_cols)) {
+        cat("Raster stack has same number of layers as feature_cols; assigning by position.\n")
+        pred_grid[, feature_cols] <- env_vals2
+      } else {
+        cat("Raster layers didn't match feature names; keeping nearest-presence surrogates.\n")
+      }
+    }
+  } else {
+    cat("Could not read rasters with terra::rast; keeping nearest-presence surrogates.\n")
+  }
+} else {
+  cat("No .tif rasters found in env/data/. — using nearest-presence surrogate features.\n")
+}
 
 # Debug: save pred_grid features and print summaries to help diagnose uniform predictions
 debug_file <- "pred_grid_features_debug.csv"
-write_csv(select(pred_grid, all_of(feature_cols)), debug_file)
+write_csv(select(pred_grid, all_of(base_feature_cols)), debug_file)
 cat("Saved prediction-grid features to:", debug_file, "\n")
 cat("Feature summaries (prediction grid):\n")
 for (col in feature_cols) {
   cat("--", col, "\n")
   print(summary(pred_grid[[col]]))
 }
+
+# Fast diagnostic: sample a subset of grid points and get predicted probabilities
+diag_n <- min(5000, nrow(pred_grid))
+set.seed(42)
+diag_idx <- sample(nrow(pred_grid), diag_n)
+diag_df <- pred_grid[diag_idx, , drop = FALSE]
+diag_pred <- predict(rf_model, newdata = select(diag_df, all_of(feature_cols)), type = "prob")[, "present"]
+cat(sprintf("Diagnostic sample predictions (%d points): min=%.4f mean=%.4f max=%.4f\n",
+            length(diag_pred), min(diag_pred), mean(diag_pred), max(diag_pred)))
+print(summary(diag_pred))
 #pred_grid_sf <- st_as_sf(pred_grid, coords = c("lng","lat"), crs = 4326)
 #env_stack <- terra::rast(c(
 #  "height.tif",
