@@ -168,7 +168,19 @@ grid_coords$prob <- pred_prob
 
 cat("Probability range:", min(pred_prob, na.rm = TRUE), "to", max(pred_prob, na.rm = TRUE), "\n")
 
-# --- 10. Create heatmaps ---------------------------------------------------
+# --- 10. Create heatmaps with model information ----------------------------
+# Prepare info text for the maps
+n_presence <- sum(train_df$presence == "present")
+n_absence <- sum(train_df$presence == "absent")
+n_total <- nrow(train_df)
+predictors_text <- paste(feature_cols, collapse = ", ")
+oob_accuracy <- round((1 - rf_model$prediction.error) * 100, 2)
+
+info_text <- sprintf(
+  "Presence: %d | Absence: %d | Total: %d\nPredictors: %s\nRF OOB Accuracy: %.2f%%",
+  n_presence, n_absence, n_total, predictors_text, oob_accuracy
+)
+
 # Heatmap without presence points
 p_hm_no_pts <- ggplot() +
   geom_raster(data = grid_coords, aes(x = lng, y = lat, fill = prob)) +
@@ -177,12 +189,15 @@ p_hm_no_pts <- ggplot() +
   coord_sf(expand = FALSE, crs = 4326,
            xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax)) +
   labs(title = "Random Forest Probability of Archaeological Findings",
+       subtitle = info_text,
        fill = "Probability") +
   theme_minimal(base_size = 12) +
-  theme(plot.title = element_text(face = "bold", size = 14))
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(size = 10, face = "italic"),
+        legend.position = "right")
 
 print(p_hm_no_pts)
-ggsave("rf_2_heatmap.png", plot = p_hm_no_pts, width = 10, height = 8, dpi = 300)
+ggsave("rf_2_heatmap.png", plot = p_hm_no_pts, width = 12, height = 9, dpi = 300)
 cat("Map saved: rf_2_heatmap.png\n")
 
 # Heatmap with presence points
@@ -191,7 +206,7 @@ p_hm_wp <- p_hm_no_pts +
              color = "yellow", size = 0.5, alpha = 0.8)
 
 print(p_hm_wp)
-ggsave("rf_2_heatmap_wp.png", plot = p_hm_wp, width = 10, height = 8, dpi = 300)
+ggsave("rf_2_heatmap_wp.png", plot = p_hm_wp, width = 12, height = 9, dpi = 300)
 cat("Map saved: rf_2_heatmap_wp.png\n")
 
 # --- End -------------------------------------------------------------------
