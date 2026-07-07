@@ -36,9 +36,9 @@ presence_df <- raw %>%
   select(lng, lat) %>%
   drop_na()
 
-# sample up to 8000 presence points for modeling
-presence_df <- presence_df %>%
-  slice_sample(n = min(8000, nrow(presence_df)))
+# sample up to 10000 presence points for modeling
+#presence_df <- presence_df %>%
+#  slice_sample(n = min(10000, nrow(presence_df)))
 
 cat("Presence points sampled:", nrow(presence_df), "\n")
 
@@ -137,7 +137,7 @@ cat("\nRandom Forest model trained\n")
 cat("OOB error estimate:", 1 - rf_model$prediction.error, "\n")
 
 # --- 7. Create prediction grid within Bavaria ----------------------------
-res_deg <- 0.05  # coarser grid for efficiency
+res_deg <- 0.02  # coarser grid for efficiency
 bbox <- st_bbox(bavaria_sf)
 xs <- seq(bbox$xmin, bbox$xmax, by = res_deg)
 ys <- seq(bbox$ymin, bbox$ymax, by = res_deg)
@@ -168,7 +168,25 @@ grid_coords$prob <- pred_prob
 
 cat("Probability range:", min(pred_prob, na.rm = TRUE), "to", max(pred_prob, na.rm = TRUE), "\n")
 
-# --- 10. Create heatmaps with model information ----------------------------
+# --- 10. Save probability raster as GeoTIFF -------------------------------
+# Create a SpatRaster from the prediction grid and write it to disk
+prob_grid <- grid_coords %>%
+  select(lng, lat, prob)
+
+prob_rast <- rast(xmin = min(prob_grid$lng), xmax = max(prob_grid$lng),
+                  ymin = min(prob_grid$lat), ymax = max(prob_grid$lat),
+                  nrows = length(unique(prob_grid$lat)),
+                  ncols = length(unique(prob_grid$lng)))
+
+# Convert to raster cells and fill values
+cell_ids <- cellFromXY(prob_rast, as.matrix(prob_grid[, c("lng", "lat")]))
+prob_rast[cell_ids] <- prob_grid$prob
+names(prob_rast) <- "probability"
+
+writeRaster(prob_rast, "rf_all_probability.tif", overwrite = TRUE)
+cat("Raster saved: rf_all_probability.tif\n")
+
+# --- 11. Create heatmaps with model information ----------------------------
 # Prepare info text for the maps
 n_presence <- sum(train_df$presence == "present")
 n_absence <- sum(train_df$presence == "absent")
@@ -197,8 +215,8 @@ p_hm_no_pts <- ggplot() +
         legend.position = "right")
 
 print(p_hm_no_pts)
-ggsave("rf_2_heatmap.png", plot = p_hm_no_pts, width = 12, height = 9, dpi = 300)
-cat("Map saved: rf_2_heatmap.png\n")
+ggsave("rf_all_heatmap.png", plot = p_hm_no_pts, width = 12, height = 9, dpi = 300)
+cat("Map saved: rf_all_heatmap.png\n")
 
 # Heatmap with presence points
 p_hm_wp <- p_hm_no_pts +
@@ -206,7 +224,7 @@ p_hm_wp <- p_hm_no_pts +
              color = "yellow", size = 0.5, alpha = 0.8)
 
 print(p_hm_wp)
-ggsave("rf_2_heatmap_wp.png", plot = p_hm_wp, width = 12, height = 9, dpi = 300)
-cat("Map saved: rf_2_heatmap_wp.png\n")
+ggsave("rf_all_heatmap_wp.png", plot = p_hm_wp, width = 12, height = 9, dpi = 300)
+cat("Map saved: rf_all_heatmap_wp.png\n")
 
 # --- End -------------------------------------------------------------------
