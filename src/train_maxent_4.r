@@ -11,6 +11,7 @@ library(rnaturalearthdata)
 library(viridis)
 library(ggplot2)
 library(pROC)
+library(terra)
 
 # 0. Settings ---------------------------------------------------------------
 
@@ -306,7 +307,42 @@ pred_grid_final <- pred_grid_base %>%
     suitability_sd = apply(prediction_matrix, 1, sd, na.rm = TRUE)
   )
 
-# 8. Plot AUC distribution --------------------------------------------------
+# 8. Save averaged prediction rasters ---------------------------------------
+
+mean_raster <- rast(
+  xmin = bbox_bavaria["xmin"],
+  xmax = bbox_bavaria["xmax"],
+  ymin = bbox_bavaria["ymin"],
+  ymax = bbox_bavaria["ymax"],
+  resolution = res_deg,
+  crs = "EPSG:4326"
+)
+
+mean_cell_idx <- cellFromXY(
+  mean_raster,
+  as.matrix(pred_grid_final[, c("lng", "lat")])
+)
+
+mean_raster[mean_cell_idx] <- pred_grid_final$suitability_mean
+names(mean_raster) <- "maxent_suitability_mean"
+
+sd_raster <- rast(mean_raster)
+sd_raster[mean_cell_idx] <- pred_grid_final$suitability_sd
+names(sd_raster) <- "maxent_suitability_sd"
+
+writeRaster(
+  mean_raster,
+  "maxent_repeated_mean_prediction.tif",
+  overwrite = TRUE
+)
+
+writeRaster(
+  sd_raster,
+  "maxent_repeated_uncertainty.tif",
+  overwrite = TRUE
+)
+
+# 9. Plot AUC distribution --------------------------------------------------
 
 p_auc <- ggplot(auc_summary, aes(x = auc)) +
   geom_histogram(bins = 20, color = "black", fill = "gray80") +
@@ -334,7 +370,7 @@ ggsave(
   dpi = 300
 )
 
-# 9. Plot averaged prediction map ------------------------------------------
+# 10. Plot averaged prediction map -----------------------------------------
 
 p_map <- ggplot() +
   geom_raster(
@@ -379,7 +415,7 @@ ggsave(
   dpi = 300
 )
 
-# 10. Plot uncertainty map --------------------------------------------------
+# 11. Plot uncertainty map --------------------------------------------------
 
 p_uncertainty <- ggplot() +
   geom_raster(
@@ -419,12 +455,14 @@ ggsave(
   dpi = 300
 )
 
-# 11. Save final prediction table ------------------------------------------
+# 12. Save final prediction table ------------------------------------------
 
 write_csv(pred_grid_final, "maxent_repeated_mean_prediction_grid.csv")
 
 cat("Saved: maxent_repeated_auc_values.csv\n")
 cat("Saved: maxent_repeated_auc_distribution.png\n")
 cat("Saved: maxent_repeated_mean_prediction.png\n")
+cat("Saved: maxent_repeated_mean_prediction.tif\n")
 cat("Saved: maxent_repeated_uncertainty.png\n")
+cat("Saved: maxent_repeated_uncertainty.tif\n")
 cat("Saved: maxent_repeated_mean_prediction_grid.csv\n")
