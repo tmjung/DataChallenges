@@ -20,9 +20,8 @@ Die wichtigsten Modellfamilien sind:
 |-- data/                 Eingangsdaten, CSV/SQL und Rasterdaten
 |-- output/               Versionierte Ergebnisdateien der Hauptmodelle
 |-- praesentation/        Praesentationsdateien
-|-- source/               Aeltere/alternative Hilfsskripte
 |-- src/                  Aktive R-Skripte und Shiny-App
-|-- sql_to_csv.py         Hilfsskript fuer SQL-Dump-nach-CSV-Konvertierung
+|-- LICENSE
 |-- README.md
 `-- .gitignore
 ```
