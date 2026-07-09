@@ -291,12 +291,22 @@ output/ensemble_glm/
 `-- rf_maxent_glm_evaluation.csv
 ```
 
-## Lizenz und Quellen
+## Lizenz und Urheber
 
-Eine Lizenzdatei ist aktuell nicht im Repository enthalten. Vor einer
-oeffentlichen Weitergabe sollte geklaert werden:
+Copyright (c) 2026 Goethe-Universitaet Frankfurt am Main.
 
-- unter welcher Lizenz der Code stehen soll,
-- ob alle Datenquellen weiterverteilt werden duerfen,
-- wie die verwendeten Datenquellen in Berichten oder Praesentationen zitiert
-  werden muessen.
+Urheber:
+
+- Toni Jungbeck
+- Bonju Koo
+
+Alle Rechte vorbehalten. Details stehen in der Datei `LICENSE`.
+
+Die Weiterverwendung, Veraenderung oder Weitergabe von Code, Daten,
+Praesentationen und Ergebnisdateien ist nur mit vorheriger Zustimmung der
+Rechteinhaber gestattet, sofern keine abweichenden Rechte fuer einzelne
+externe Datenquellen gelten.
+
+Bei externer Nutzung oder Veroeffentlichung muessen zusaetzlich die
+Lizenzbedingungen und Zitierhinweise der verwendeten Datenquellen beachtet
+werden.
