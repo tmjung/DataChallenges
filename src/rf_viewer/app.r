@@ -1,6 +1,6 @@
 ################################################################################
 # Viewer
-# Archaeological Prediction Map - Eisenzeit in Bayern
+# Archaeological Prediction Map - Eisenzeit 
 ################################################################################
 
 library(shiny)

@@ -1,0 +1,5 @@
+metric,value
+roc_auc,0.9987862894484056
+accuracy,0.976093077617808
+threshold,0.5
+n,37646
