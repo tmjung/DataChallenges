@@ -4,3 +4,5 @@
 *.png
 *.tif
 *.rds
+!output/
+!output/**
