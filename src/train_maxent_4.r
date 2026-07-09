@@ -33,7 +33,7 @@ fix_decimal <- function(x) {
 }
 
 raw <- read_csv(
-  "ffm_vfpa_eisenzeit.csv",
+  "data/ffm_vfpa_eisenzeit.csv",
   locale = locale(decimal_mark = ","),
   col_types = cols(
     lng_wgs84 = col_character(),

@@ -108,7 +108,7 @@ cat("Verwertbare Fund-Datensätze:", nrow(presence_df), "\n")
 
 # Reduziere die Anzahl der Präsenzpunkte für schnelleres Testen
 presence_df <- presence_df %>%
-  slice_sample(n = 2000)
+  slice_sample(n = 5000)
 
 cat("Nach Stichprobe (2000 Präsenzpunkte):", nrow(presence_df), "\n")
 
@@ -700,7 +700,7 @@ names(r)         <- "fund_wahrscheinlichkeit"
 sum(is.na(cell_idx))
 length(cell_idx)
 
-save_name <- "heatmap_eisenzeit_bavaria_6"
+save_name <- "test_run"
 save_name_tif <- paste(save_name, ".tif", sep = "")
 save_name_png <- paste(save_name, ".png", sep = "")
 

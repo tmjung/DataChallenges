@@ -6,14 +6,57 @@ library(rnaturalearthdata)
 library(ranger)
 library(viridis)
 
+if (file.exists("src/project_paths.r")) {
+  source("src/project_paths.r")
+} else {
+  source("project_paths.r")
+}
+
 set.seed(42)
+
+# -------------------------------------------------------------------------
+# 0. Ausgabe-Pfade
+# -------------------------------------------------------------------------
+
+output_dir <- project_path("output", "random_forest_5km_buffer")
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+
+presence_absence_png <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_presence_absence_punkte.png"
+)
+
+probability_tif <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_fundwahrscheinlichkeit.tif"
+)
+
+heatmap_png <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_fundwahrscheinlichkeit_heatmap.png"
+)
+
+heatmap_presence_png <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_fundwahrscheinlichkeit_mit_presence_punkten.png"
+)
+
+model_rds <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_modell.rds"
+)
+
+training_data_csv <- file.path(
+  output_dir,
+  "random_forest_5km_buffer_trainingsdaten.csv"
+)
 
 # -------------------------------------------------------------------------
 # 1. Daten laden
 # -------------------------------------------------------------------------
 
 raw <- read_csv(
-  "data/ffm_vfpa_eisenzeit.csv",
+  project_path("data", "ffm_vfpa_eisenzeit.csv"),
   locale = locale(decimal_mark = ","),
   col_types = cols(
     lng_wgs84 = col_character(),
@@ -41,11 +84,11 @@ cat("Presence points:", nrow(presence_df), "\n")
 # 2. Raster laden und Jahreswerte erzeugen
 # -------------------------------------------------------------------------
 
-precip_monthly <- rast("data/climate/precipitation.tif") # Niederschlag
-temp_monthly   <- rast("data/climate/temperature.tif")
-elevation      <- rast("data/dem/DEU_elv_msk.tif")
-dem            <- rast("data/dem/dem.tif")
-slope          <- rast("data/dem/slope.tif")
+precip_monthly <- rast(project_path("data", "climate", "precipitation.tif")) # Niederschlag
+temp_monthly   <- rast(project_path("data", "climate", "temperature.tif"))
+elevation      <- rast(project_path("data", "dem", "DEU_elv_msk.tif"))
+dem            <- rast(project_path("data", "dem", "dem.tif"))
+slope          <- rast(project_path("data", "dem", "slope.tif"))
 
 # WorldClim precipitation = Monatsniederschlag
 precipitation <- sum(precip_monthly, na.rm = TRUE)
@@ -212,19 +255,21 @@ p_points <- ggplot() +
       "absent" = "Absence",
       "present" = "Presence"
     ),
-    name = "Point type"
+    name = "Punkttyp"
   ) +
   coord_sf(
     expand = FALSE,
     crs = 4326
   ) +
   labs(
-    title = "Presence and Absence Points",
+    title = "Presence- und Absence-Punkte",
     subtitle = sprintf(
       "Presence: %d | Absence: %d",
       sum(points_plot_df$presence == "present"),
       sum(points_plot_df$presence == "absent")
-    )
+    ),
+    x = "Laengengrad",
+    y = "Breitengrad"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -236,14 +281,14 @@ p_points <- ggplot() +
 print(p_points)
 
 ggsave(
-  "rf_final_5km_blue_presence_absence_points.png",
+  presence_absence_png,
   plot = p_points,
   width = 12,
   height = 9,
   dpi = 300
 )
 
-cat("Map saved: rf_final_5km_blue_presence_absence_points.png\n")
+cat("Map saved: ", presence_absence_png, "\n", sep = "")
 
 # -------------------------------------------------------------------------
 # 8. Random Forest trainieren
@@ -298,6 +343,17 @@ oob_auc <- calc_auc(
 cat("OOB ROC AUC:", oob_auc, "\n")
 
 print(rf_model$variable.importance)
+
+importance_df <- tibble(
+  predictor = names(rf_model$variable.importance),
+  importance = as.numeric(rf_model$variable.importance)
+) %>%
+  arrange(desc(importance))
+
+write_csv(
+  importance_df,
+  file.path(output_dir, "random_forest_variable_importance.csv")
+)
 
 # -------------------------------------------------------------------------
 # 8. Raster für flächige Vorhersage vorbereiten
@@ -383,11 +439,11 @@ print(global(probability_raster, "range", na.rm = TRUE))
 
 writeRaster(
   probability_raster,
-  "rf_final_5km_blue_probability.tif",
+  probability_tif,
   overwrite = TRUE
 )
 
-cat("Raster saved: rf_final_5km_blue_probability.tif\n")
+cat("Raster saved: ", probability_tif, "\n", sep = "")
 
 # -------------------------------------------------------------------------
 # 12. Heatmap als PNG speichern
@@ -417,7 +473,7 @@ predictors_text <- paste(feature_cols, collapse = ", ")
 oob_accuracy <- round((1 - rf_model$prediction.error) * 100, 2)
 
 info_text <- sprintf(
-  "Presence: %d | Absence: %d | Total: %d\nPredictors: %s\nRF OOB Accuracy: %.2f%%",
+  "Presence: %d | Absence: %d | Gesamt: %d\nPraediktoren: %s\nRF OOB-Genauigkeit: %.2f%%",
   n_presence,
   n_absence,
   n_total,
@@ -447,9 +503,11 @@ p_hm_no_pts <- ggplot() +
     expand = FALSE
   ) +
   labs(
-    title = "Random Forest Probability of Archaeological Findings",
+    title = "Random-Forest-Wahrscheinlichkeit archaeologischer Fundstellen",
     subtitle = info_text,
-    fill = "Probability"
+    fill = "Wahrscheinlichkeit",
+    x = "Laengengrad",
+    y = "Breitengrad"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -461,14 +519,14 @@ p_hm_no_pts <- ggplot() +
 print(p_hm_no_pts)
 
 ggsave(
-  "rf_final_5km_blue_heatmap.png",
+  heatmap_png,
   plot = p_hm_no_pts,
   width = 12,
   height = 9,
   dpi = 300
 )
 
-cat("Map saved: rf_final_5km_blue_heatmap.png\n")
+cat("Map saved: ", heatmap_png, "\n", sep = "")
 
 # Heatmap mit Presence-Punkten
 p_hm_wp <- p_hm_no_pts +
@@ -478,32 +536,35 @@ p_hm_wp <- p_hm_no_pts +
     color = "blue",
     size = 0.5,
     alpha = 0.8
+  ) +
+  labs(
+    title = "Random-Forest-Wahrscheinlichkeit mit Presence-Punkten"
   )
 
 print(p_hm_wp)
 
 ggsave(
-  "rf_final_5km_blue_heatmap_wp.png",
+  heatmap_presence_png,
   plot = p_hm_wp,
   width = 12,
   height = 9,
   dpi = 300
 )
 
-cat("Map saved: rf_final_5km_blue_heatmap_wp.png\n")
+cat("Map saved: ", heatmap_presence_png, "\n", sep = "")
 
 # -------------------------------------------------------------------------
 # 13. Modell und Trainingsdaten speichern
 # -------------------------------------------------------------------------
 
-saveRDS(rf_model, "rf_final_5km_blue_model.rds")
-write_csv(train_df, "rf_final_5km_blue_training_data.csv")
+saveRDS(rf_model, model_rds)
+write_csv(train_df, training_data_csv)
 
 cat("\nDone.\n")
 cat("Created:\n")
-cat(" - rf_final_5km_blue_probability.tif\n")
-cat(" - rf_final_5km_blue_presence_absence_points.png\n")
-cat(" - rf_final_5km_blue_heatmap.png\n")
-cat(" - rf_final_5km_blue_heatmap_wp.png\n")
-cat(" - rf_final_5km_blue_model.rds\n")
-cat(" - rf_final_5km_blue_training_data.csv\n")
+cat(" - ", probability_tif, "\n", sep = "")
+cat(" - ", presence_absence_png, "\n", sep = "")
+cat(" - ", heatmap_png, "\n", sep = "")
+cat(" - ", heatmap_presence_png, "\n", sep = "")
+cat(" - ", model_rds, "\n", sep = "")
+cat(" - ", training_data_csv, "\n", sep = "")

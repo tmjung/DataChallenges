@@ -7,6 +7,12 @@ suppressPackageStartupMessages({
   library(ranger)
 })
 
+if (file.exists("src/project_paths.r")) {
+  source("src/project_paths.r")
+} else {
+  source("project_paths.r")
+}
+
 set.seed(42)
 
 # -------------------------------------------------------------------------
@@ -14,7 +20,7 @@ set.seed(42)
 # -------------------------------------------------------------------------
 
 raw <- suppressMessages(read_csv(
-  "data/ffm_vfpa_eisenzeit.csv",
+  project_path("data", "ffm_vfpa_eisenzeit.csv"),
   locale = locale(decimal_mark = ","),
   col_types = cols(
     lng_wgs84 = col_character(),
@@ -36,11 +42,11 @@ presence_df <- raw %>%
 # 2. Raster laden und Jahreswerte erzeugen
 # -------------------------------------------------------------------------
 
-precip_monthly <- rast("data/climate/precipitation.tif")
-temp_monthly   <- rast("data/climate/temperature.tif")
-elevation      <- rast("data/dem/DEU_elv_msk.tif")
-dem            <- rast("data/dem/dem.tif")
-slope          <- rast("data/dem/slope.tif")
+precip_monthly <- rast(project_path("data", "climate", "precipitation.tif"))
+temp_monthly   <- rast(project_path("data", "climate", "temperature.tif"))
+elevation      <- rast(project_path("data", "dem", "DEU_elv_msk.tif"))
+dem            <- rast(project_path("data", "dem", "dem.tif"))
+slope          <- rast(project_path("data", "dem", "slope.tif"))
 
 precipitation <- sum(precip_monthly, na.rm = TRUE)
 names(precipitation) <- "precipitation"

@@ -3,35 +3,30 @@
 ################################################################################
 
 ui <- fluidPage(
-
-  titlePanel("Random Forest Viewer - Archaeological Prediction"),
+  titlePanel("Viewer - Archaeological Prediction Map: Eisenzeit in Bayern"),
 
   sidebarLayout(
-
-    ###########################################################################
-    # Sidebar
-    ###########################################################################
-
     sidebarPanel(
-
       width = 3,
 
       h4("Kartendarstellung"),
 
       selectInput(
         inputId = "layer",
-        label = "Heatmap auswählen",
-        choices = names(layers),
-        selected = "Fundwahrscheinlichkeit"
+        label = "Layer auswaehlen",
+        choices = layer_choices,
+        selected = default_layer
       ),
+
+      uiOutput("presence_toggle_ui"),
 
       hr(),
 
       h4("Informationen"),
 
       p(
-        "Klicke auf einen beliebigen Punkt der Karte, um die Werte der",
-        "Umweltvariablen und die Fundwahrscheinlichkeit anzuzeigen."
+        "Alle .tif-Dateien unter output werden automatisch geladen.",
+        "Klicke auf die Karte, um die Rasterwerte am Punkt auszulesen."
       ),
 
       hr(),
@@ -49,27 +44,25 @@ ui <- fluidPage(
       h4("Legende"),
 
       helpText(
-        "Die dargestellte Heatmap basiert auf dem ausgewählten GeoTIFF.",
-        "Alle Werte werden direkt aus den Rasterdaten ausgelesen."
+        "Die dargestellte Heatmap basiert auf dem ausgewaehlten GeoTIFF.",
+        "Die Tabelle zeigt die Werte aller geladenen Output-Raster am Klickpunkt."
       )
-
     ),
 
-    ###########################################################################
-    # Karte
-    ###########################################################################
-
     mainPanel(
-
       width = 9,
 
       leafletOutput(
         outputId = "map",
         height = "850px"
+      ),
+
+      uiOutput("preview_title"),
+
+      imageOutput(
+        outputId = "heatmap_preview",
+        height = "auto"
       )
-
     )
-
   )
-
 )

@@ -14,19 +14,25 @@ library(ggplot2)
 library(pROC)
 library(terra)
 
+if (file.exists("src/project_paths.r")) {
+  source("src/project_paths.r")
+} else {
+  source("project_paths.r")
+}
+
 # 0. Settings ---------------------------------------------------------------
 
 n_repeats <- 20
 base_seed <- 42
 presence_sample_n <- 1000
 
-output_dir <- "output/maxent_rf_grid"
+output_dir <- project_path("output", "maxent_rf_grid")
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
 rf_template_tif <- ifelse(
-  file.exists("output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif"),
-  "output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif",
-  "rf_final_5km_blue_probability.tif"
+  file.exists(project_path("output", "random_forest_5km_buffer", "random_forest_5km_buffer_fundwahrscheinlichkeit.tif")),
+  project_path("output", "random_forest_5km_buffer", "random_forest_5km_buffer_fundwahrscheinlichkeit.tif"),
+  project_path("rf_final_5km_blue_probability.tif")
 )
 
 maxent_mean_tif <- file.path(
@@ -77,7 +83,7 @@ fix_decimal <- function(x) {
 }
 
 raw <- read_csv(
-  "data/ffm_vfpa_eisenzeit.csv",
+  project_path("data", "ffm_vfpa_eisenzeit.csv"),
   locale = locale(decimal_mark = ","),
   col_types = cols(
     lng_wgs84 = col_character(),

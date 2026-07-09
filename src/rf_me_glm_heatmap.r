@@ -7,42 +7,52 @@ library(ggplot2)
 library(viridis)
 library(readr)
 
+if (file.exists("src/project_paths.r")) {
+  source("src/project_paths.r")
+} else {
+  source("project_paths.r")
+}
+
 # Usage:
 # Rscript src/rf_me_glm_heatmap.r [maxent_tif] [rf_tif] [glm_tif] \
 #   [output_prefix] [rf_weight] [maxent_weight] [glm_weight] [output_dir]
 #
 # Defaults:
-# maxent_tif    = maxent_repeated_mean_prediction_rf_grid.tif, if available
+# maxent_tif    = output/maxent_rf_grid/maxent_rf_grid_mittlere_standorteignung.tif, if available
 # rf_tif        = output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif, if available
 # glm_tif       = output/glm/glm_probability.tif
 # output_prefix = rf_maxent_glm
-# rf_weight     = 1
-# maxent_weight = 1
-# glm_weight    = 1
+# rf_weight     = 0.45
+# maxent_weight = 0.35
+# glm_weight    = 0.2
 # output_dir    = output/ensemble_glm
 
 args <- commandArgs(trailingOnly = TRUE)
 
 default_maxent_tif <- ifelse(
-  file.exists("maxent_repeated_mean_prediction_rf_grid.tif"),
-  "maxent_repeated_mean_prediction_rf_grid.tif",
-  "maxent_repeated_mean_prediction.tif"
+  file.exists(project_path("output", "maxent_rf_grid", "maxent_rf_grid_mittlere_standorteignung.tif")),
+  project_path("output", "maxent_rf_grid", "maxent_rf_grid_mittlere_standorteignung.tif"),
+  ifelse(
+    file.exists(project_path("output", "maxent", "maxent_repeated_mean_prediction_rf_grid.tif")),
+    project_path("output", "maxent", "maxent_repeated_mean_prediction_rf_grid.tif"),
+    project_path("output", "maxent", "maxent_repeated_mean_prediction.tif")
+  )
 )
 
 default_rf_tif <- ifelse(
-  file.exists("output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif"),
-  "output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif",
-  "rf_final_5km_blue_probability.tif"
+  file.exists(project_path("output", "random_forest_5km_buffer", "random_forest_5km_buffer_fundwahrscheinlichkeit.tif")),
+  project_path("output", "random_forest_5km_buffer", "random_forest_5km_buffer_fundwahrscheinlichkeit.tif"),
+  project_path("rf_final_5km_blue_probability.tif")
 )
 
 maxent_tif <- ifelse(length(args) >= 1, args[1], default_maxent_tif)
 rf_tif <- ifelse(length(args) >= 2, args[2], default_rf_tif)
-glm_tif <- ifelse(length(args) >= 3, args[3], "output/glm/glm_probability.tif")
+glm_tif <- ifelse(length(args) >= 3, args[3], project_path("output", "glm", "glm_probability.tif"))
 output_prefix <- ifelse(length(args) >= 4, args[4], "rf_maxent_glm")
-rf_weight <- ifelse(length(args) >= 5, as.numeric(args[5]), 1)
-maxent_weight <- ifelse(length(args) >= 6, as.numeric(args[6]), 1)
-glm_weight <- ifelse(length(args) >= 7, as.numeric(args[7]), 1)
-output_dir <- ifelse(length(args) >= 8, args[8], "output/ensemble_glm")
+rf_weight <- 0.45 #ifelse(length(args) >= 5, as.numeric(args[5]), 1)
+maxent_weight <- 0.35 #ifelse(length(args) >= 6, as.numeric(args[6]), 1)
+glm_weight <- 0.2 #ifelse(length(args) >= 7, as.numeric(args[7]), 1)
+output_dir <- ifelse(length(args) >= 8, args[8], project_path("output", "ensemble_glm"))
 
 if (!file.exists(maxent_tif)) {
   stop("MaxEnt-GeoTIFF nicht gefunden: ", maxent_tif)
@@ -80,6 +90,7 @@ rf_minus_glm_png <- file.path(output_dir, paste0(output_prefix, "_rf_minus_glm.p
 maxent_minus_glm_tif <- file.path(output_dir, paste0(output_prefix, "_maxent_minus_glm.tif"))
 maxent_minus_glm_png <- file.path(output_dir, paste0(output_prefix, "_maxent_minus_glm.png"))
 diagnostics_csv <- file.path(output_dir, paste0(output_prefix, "_raster_diagnostics.csv"))
+evaluation_csv <- file.path(output_dir, paste0(output_prefix, "_evaluation.csv"))
 
 cat("Lade Raster...\n")
 rf_raster <- rast(rf_tif)[[1]]
@@ -108,6 +119,21 @@ raster_summary <- function(r, label, path) {
     crs = crs(r, describe = TRUE)$code,
     valid_cells = global(!is.na(r), "sum", na.rm = TRUE)[1, 1]
   )
+}
+
+calc_auc <- function(actual, scores, positive_class = 1) {
+  actual_binary <- actual == positive_class
+  n_positive <- sum(actual_binary)
+  n_negative <- sum(!actual_binary)
+
+  if (n_positive == 0 || n_negative == 0) {
+    return(NA_real_)
+  }
+
+  ranks <- rank(scores, ties.method = "average")
+
+  (sum(ranks[actual_binary]) - n_positive * (n_positive + 1) / 2) /
+    (n_positive * n_negative)
 }
 
 align_to_rf <- function(r, label) {
@@ -206,6 +232,70 @@ mean_raster <- lapp(
 )
 names(mean_raster) <- "rf_maxent_glm_weighted_mean"
 
+evaluation_points_csv <- project_path("output", "random_forest_5km_buffer", "random_forest_5km_buffer_trainingsdaten.csv")
+ensemble_auc <- NA_real_
+ensemble_accuracy <- NA_real_
+metrics_text <- "Ensemble-Evaluation: nicht berechnet"
+
+if (file.exists(evaluation_points_csv)) {
+  cat("\nBerechne Ensemble ROC-AUC und Accuracy...\n")
+
+  evaluation_points <- read_csv(
+    evaluation_points_csv,
+    show_col_types = FALSE
+  )
+
+  evaluation_points <- evaluation_points[complete.cases(evaluation_points[, c("lng", "lat", "presence")]), ]
+
+  evaluation_vect <- vect(
+    as.matrix(evaluation_points[, c("lng", "lat")]),
+    crs = "EPSG:4326"
+  )
+
+  evaluation_scores <- terra::extract(mean_raster, evaluation_vect)[, 2]
+
+  evaluation_df <- data.frame(
+    actual = ifelse(evaluation_points$presence == "present", 1, 0),
+    score = evaluation_scores
+  )
+
+  evaluation_df <- evaluation_df[complete.cases(evaluation_df), ]
+
+  ensemble_auc <- calc_auc(
+    actual = evaluation_df$actual,
+    scores = evaluation_df$score,
+    positive_class = 1
+  )
+
+  ensemble_accuracy <- mean(
+    ifelse(evaluation_df$score >= 0.5, 1, 0) == evaluation_df$actual
+  )
+
+  metrics_text <- sprintf(
+    "Ensemble ROC-AUC = %.3f | Accuracy = %.3f | Schwelle = 0.5 | n = %d",
+    ensemble_auc,
+    ensemble_accuracy,
+    nrow(evaluation_df)
+  )
+
+  cat(metrics_text, "\n")
+
+  write_csv(
+    data.frame(
+      metric = c("roc_auc", "accuracy", "threshold", "n"),
+      value = c(ensemble_auc, ensemble_accuracy, 0.5, nrow(evaluation_df))
+    ),
+    evaluation_csv
+  )
+} else {
+  cat(
+    "\nEvaluation nicht berechnet: Trainingsdaten nicht gefunden: ",
+    evaluation_points_csv,
+    "\n",
+    sep = ""
+  )
+}
+
 agreement_raster <- lapp(
   prediction_stack,
   fun = agreement_fun
@@ -273,7 +363,9 @@ plot_raster_png <- function(r, png_path, title, fill_name, option, limits = NULL
         "| MaxEnt:",
         basename(maxent_tif),
         "| GLM:",
-        basename(glm_tif)
+        basename(glm_tif),
+        "\n",
+        metrics_text
       ),
       x = "Laengengrad",
       y = "Breitengrad"
@@ -340,7 +432,7 @@ plot_raster_png(
   "viridis"
 )
 
-presence_csv <- "data/ffm_vfpa_eisenzeit.csv"
+presence_csv <- project_path("data", "ffm_vfpa_eisenzeit.csv")
 
 if (file.exists(presence_csv)) {
   cat("Speichere PNG-Heatmap mit Presence-Punkten...\n")
@@ -391,6 +483,7 @@ if (file.exists(presence_csv)) {
 
 cat("\nGespeicherte Ausgaben:\n")
 cat(" - ", diagnostics_csv, "\n", sep = "")
+cat(" - ", evaluation_csv, "\n", sep = "")
 cat(" - ", mean_tif, "\n", sep = "")
 cat(" - ", mean_png, "\n", sep = "")
 cat(" - ", mean_points_png, "\n", sep = "")

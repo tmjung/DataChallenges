@@ -6,6 +6,12 @@ library(rnaturalearthdata)
 library(ranger)
 library(viridis)
 
+if (file.exists("src/project_paths.r")) {
+  source("src/project_paths.r")
+} else {
+  source("project_paths.r")
+}
+
 set.seed(42)
 
 # -------------------------------------------------------------------------
@@ -13,7 +19,7 @@ set.seed(42)
 # -------------------------------------------------------------------------
 
 raw <- read_csv(
-  "data/ffm_vfpa_eisenzeit.csv",
+  project_path("data", "ffm_vfpa_eisenzeit.csv"),
   locale = locale(decimal_mark = ","),
   col_types = cols(
     lng_wgs84 = col_character(),
@@ -41,11 +47,11 @@ cat("Presence points:", nrow(presence_df), "\n")
 # 2. Raster laden und Jahreswerte erzeugen
 # -------------------------------------------------------------------------
 
-precip_monthly <- rast("data/climate/precipitation.tif")
-temp_monthly   <- rast("data/climate/temperature.tif")
-elevation      <- rast("data/dem/DEU_elv_msk.tif")
-dem            <- rast("data/dem/dem.tif")
-slope          <- rast("data/dem/slope.tif")
+precip_monthly <- rast(project_path("data", "climate", "precipitation.tif"))
+temp_monthly   <- rast(project_path("data", "climate", "temperature.tif"))
+elevation      <- rast(project_path("data", "dem", "DEU_elv_msk.tif"))
+dem            <- rast(project_path("data", "dem", "dem.tif"))
+slope          <- rast(project_path("data", "dem", "slope.tif"))
 
 # WorldClim precipitation = Monatsniederschlag
 precipitation <- sum(precip_monthly, na.rm = TRUE)
@@ -83,7 +89,7 @@ cat("Bavaria boundary loaded\n")
 # -------------------------------------------------------------------------
 
 msqr_raw <- read_csv(
-  "data/msqr.csv",
+  project_path("data", "msqr.csv"),
   show_col_types = FALSE
 )
 
@@ -174,7 +180,7 @@ p_msqr <- ggplot() +
 print(p_msqr)
 
 ggsave(
-  "rf_7_msqr_map.png",
+  project_path("rf_7_msqr_map.png"),
   plot = p_msqr,
   width = 12,
   height = 9,
@@ -342,7 +348,7 @@ p_points <- ggplot() +
 print(p_points)
 
 ggsave(
-  "rf_7_msqr_presence_absence_points.png",
+  project_path("rf_7_msqr_presence_absence_points.png"),
   plot = p_points,
   width = 12,
   height = 9,
@@ -457,7 +463,7 @@ print(global(probability_raster, "range", na.rm = TRUE))
 
 writeRaster(
   probability_raster,
-  "rf_7_msqr_probability.tif",
+  project_path("rf_7_msqr_probability.tif"),
   overwrite = TRUE
 )
 
@@ -524,7 +530,7 @@ p_hm_no_pts <- ggplot() +
 print(p_hm_no_pts)
 
 ggsave(
-  "rf_7_msqr_heatmap.png",
+  project_path("rf_7_msqr_heatmap.png"),
   plot = p_hm_no_pts,
   width = 12,
   height = 9,
@@ -546,7 +552,7 @@ p_hm_wp <- p_hm_no_pts +
 print(p_hm_wp)
 
 ggsave(
-  "rf_7_msqr_heatmap_wp.png",
+  project_path("rf_7_msqr_heatmap_wp.png"),
   plot = p_hm_wp,
   width = 12,
   height = 9,
@@ -559,8 +565,8 @@ cat("Map saved: rf_7_msqr_heatmap_wp.png\n")
 # 13. Modell und Trainingsdaten speichern
 # -------------------------------------------------------------------------
 
-saveRDS(rf_model, "rf_7_msqr_model.rds")
-write_csv(train_df, "rf_7_msqr_training_data.csv")
+saveRDS(rf_model, project_path("rf_7_msqr_model.rds"))
+write_csv(train_df, project_path("rf_7_msqr_training_data.csv"))
 
 cat("\nDone.\n")
 cat("Created:\n")

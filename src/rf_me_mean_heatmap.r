@@ -12,7 +12,7 @@ library(readr)
 #   [rf_weight] [maxent_weight] [output_dir]
 #
 # Defaults:
-# maxent_tif    = maxent_repeated_mean_prediction_rf_grid.tif, if available
+# maxent_tif    = output/maxent_rf_grid/maxent_rf_grid_mittlere_standorteignung.tif, if available
 # rf_tif        = output/random_forest_5km_buffer/random_forest_5km_buffer_fundwahrscheinlichkeit.tif, if available
 # output_prefix = rf_maxent
 # rf_weight     = 1
@@ -22,9 +22,13 @@ library(readr)
 args <- commandArgs(trailingOnly = TRUE)
 
 default_maxent_tif <- ifelse(
-  file.exists("maxent_repeated_mean_prediction_rf_grid.tif"),
-  "maxent_repeated_mean_prediction_rf_grid.tif",
-  "maxent_repeated_mean_prediction.tif"
+  file.exists("output/maxent_rf_grid/maxent_rf_grid_mittlere_standorteignung.tif"),
+  "output/maxent_rf_grid/maxent_rf_grid_mittlere_standorteignung.tif",
+  ifelse(
+    file.exists("maxent_repeated_mean_prediction_rf_grid.tif"),
+    "maxent_repeated_mean_prediction_rf_grid.tif",
+    "maxent_repeated_mean_prediction.tif"
+  )
 )
 
 maxent_tif <- ifelse(length(args) >= 1, args[1], default_maxent_tif)
