@@ -293,7 +293,7 @@ output/ensemble_glm/
 
 ## Lizenz und Urheber
 
-Copyright (c) 2026 Goethe-Universitaet Frankfurt am Main.
+Copyright (c) 2026 Frankfurt am Main.
 
 Urheber:
 
